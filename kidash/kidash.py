@@ -62,17 +62,21 @@ KIBANA_MAPPING = {
     "mappings": {
         "dynamic": "strict",
         "properties": {
-            "application_usage_totals": {
-                "type": "object",
-                "dynamic": "false"
-            },
-            "application_usage_transactional": {
+            "application_usage_daily": {
                 "dynamic": "false",
                 "properties": {
                     "timestamp": {
                         "type": "date"
                     }
                 }
+            },
+            "application_usage_totals": {
+                "type": "object",
+                "dynamic": "false"
+            },
+            "application_usage_transactional": {
+                "type": "object",
+                "dynamic": "false"
             },
             "config": {
                 "dynamic": "false",
@@ -88,45 +92,64 @@ KIBANA_MAPPING = {
                         "type": "text"
                     },
                     "hits": {
-                        "type": "integer"
+                        "type": "integer",
+                        "index": False,
+                        "doc_values": False
                     },
                     "kibanaSavedObjectMeta": {
                         "properties": {
                             "searchSourceJSON": {
-                                "type": "text"
+                                "type": "text",
+                                "index": False
                             }
                         }
                     },
                     "optionsJSON": {
-                        "type": "text"
+                        "type": "text",
+                        "index": False
                     },
                     "panelsJSON": {
-                        "type": "text"
+                        "type": "text",
+                        "index": False
                     },
                     "refreshInterval": {
                         "properties": {
                             "display": {
-                                "type": "keyword"
+                                "type": "keyword",
+                                "index": False,
+                                "doc_values": False
                             },
                             "pause": {
-                                "type": "boolean"
+                                "type": "boolean",
+                                "doc_values": False,
+                                "index": False
                             },
                             "section": {
-                                "type": "integer"
+                                "type": "integer",
+                                "index": False,
+                                "doc_values": False
                             },
                             "value": {
-                                "type": "integer"
+                                "type": "integer",
+                                "index": False,
+                                "doc_values": False
                             }
                         }
                     },
                     "timeFrom": {
-                        "type": "keyword"
+                        "type": "keyword",
+                        "index": False,
+                        "doc_values": False
                     },
                     "timeRestore": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "doc_values": False,
+                        "index": False
                     },
                     "timeTo": {
-                        "type": "keyword"
+                        "type": "keyword",
+                        "index": False,
+                        "doc_values": False
                     },
                     "title": {
                         "type": "text"
@@ -137,32 +160,12 @@ KIBANA_MAPPING = {
                 }
             },
             "index-pattern": {
+                "dynamic": "false",
                 "properties": {
-                    "fieldFormatMap": {
-                        "type": "text"
-                    },
-                    "fields": {
-                        "type": "text"
-                    },
-                    "intervalName": {
-                        "type": "keyword"
-                    },
-                    "notExpandable": {
-                        "type": "boolean"
-                    },
-                    "sourceFilters": {
-                        "type": "text"
-                    },
-                    "timeFieldName": {
-                        "type": "keyword"
-                    },
                     "title": {
                         "type": "text"
                     },
                     "type": {
-                        "type": "keyword"
-                    },
-                    "typeMeta": {
                         "type": "keyword"
                     }
                 }
@@ -295,6 +298,9 @@ KIBANA_MAPPING = {
             "namespaces": {
                 "type": "keyword"
             },
+            "originId": {
+                "type": "keyword"
+            },
             "projectname": {
                 "properties": {
                     "name": {
@@ -365,14 +371,16 @@ KIBANA_MAPPING = {
                 "properties": {
                     "columns": {
                         "type": "keyword",
-                        "index": False
+                        "index": False,
+                        "doc_values": False
                     },
                     "description": {
                         "type": "text"
                     },
                     "hits": {
                         "type": "integer",
-                        "index": False
+                        "index": False,
+                        "doc_values": False
                     },
                     "kibanaSavedObjectMeta": {
                         "properties": {
@@ -384,7 +392,8 @@ KIBANA_MAPPING = {
                     },
                     "sort": {
                         "type": "keyword",
-                        "index": False
+                        "index": False,
+                        "doc_values": False
                     },
                     "title": {
                         "type": "text"
@@ -489,24 +498,29 @@ KIBANA_MAPPING = {
                     "kibanaSavedObjectMeta": {
                         "properties": {
                             "searchSourceJSON": {
-                                "type": "text"
+                                "type": "text",
+                                "index": False
                             }
                         }
                     },
                     "savedSearchRefName": {
-                        "type": "keyword"
+                        "type": "keyword",
+                        "index": False,
+                        "doc_values": False
                     },
                     "title": {
                         "type": "text"
                     },
                     "uiStateJSON": {
-                        "type": "text"
+                        "type": "text",
+                        "index": False
                     },
                     "version": {
                         "type": "integer"
                     },
                     "visState": {
-                        "type": "text"
+                        "type": "text",
+                        "index": False
                     }
                 }
             }
@@ -586,7 +600,7 @@ def find_item_json(elastic, type_, item_id):
         item_json_url = elastic.index_url + "/_doc/" + item_id
 
     res = requests_ses.get(item_json_url, verify=False)
-    if res.status_code == 200 and res.status_code == 404:
+    if res.status_code != 404:
         res.raise_for_status()
 
     item_json = res.json()
@@ -595,12 +609,75 @@ def find_item_json(elastic, type_, item_id):
         logger.debug("Can not find type %s item %s", type_, item_id)
         item_json = {}
     else:
+        if elastic_ver >= 7:
+            item_json = fix_timelion_visualization(item_json)
+
         # item_json = item_json["_source"][type_]
         item_json = {
             type_: item_json["_source"][type_],
             "references": item_json["_source"]["references"]
         }
     return item_json
+
+
+def fix_timelion_visualization(item_json):
+    """This method fix the timelion expression for ES version 7.x.
+
+    :param: item_json: Original visualization
+
+    :return: Visualization with timelion expression fixed
+    """
+
+    if item_json['_source']['type'] == 'visualization':
+        visState = item_json['_source']['visualization']['visState']
+        if "timelion" in visState:
+            if 'subtype' in visState:
+                visState = fix_subtype(visState)
+            fixed_item_json = copy.deepcopy(item_json)
+            expresion = visState.split('"params":{"expression":"')
+            interval = expresion[1].split('","interval":"')
+            timelion_exp = interval[0].replace('\\"', '"').replace('"', '\\\"')
+            new_visState = '%s"params":{"expression":"%s","interval":"%s' % (expresion[0], timelion_exp, interval[1])
+            fixed_item_json['_source']['visualization']['visState'] = new_visState
+            return fixed_item_json
+
+    return item_json
+
+
+def fix_subtype(text):
+    """Fix subtype when the content is between double quotes.
+
+    When the string is 'q="' the value of the subtype_count will be set to 3.
+    And if the subtype_count value is 3 it will skip '"' and '\' until the next
+    character is ')' and the subtype_count will be set to 0.
+
+    i.e
+    original: q="-subtype:"channel_join" AND -subtype:"bot_message" AND -subtype:"bot_add"")
+    fixed: q="-subtype:channel_join AND -subtype:bot_message AND -subtype:bot_add")
+
+    :param: text: Original text
+
+    :return: Fixed text
+    """
+    subtype_count = 0
+    new_text = ""
+    for c in text:
+        if subtype_count == 3 and c == ')':
+            new_text += '")'
+            subtype_count = 0
+            continue
+        elif subtype_count == 3 and (c == '"' or c == '\\'):
+            continue
+
+        if c == 'q':
+            subtype_count = 1
+        elif subtype_count == 1 and c == '=':
+            subtype_count = 2
+        elif subtype_count == 2 and c == '"':
+            subtype_count = 3
+        new_text += c
+
+    return new_text
 
 
 def clean_dashboard(dash_json, data_sources=None, add_vis_studies=False, viz_titles=None):
@@ -1457,7 +1534,7 @@ def create_kibana_index(kibana_url, kibana_index_url):
     """
     Force the creation of the kibana index using the kibana API
     :param kibana_url: Kibana URL
-    :param kibana_index_url: Kiban index URL (.kibana)
+    :param kibana_index_url: Kibana index URL (.kibana)
 
     :return:
     """
@@ -1480,7 +1557,7 @@ def create_kibana_index(kibana_url, kibana_index_url):
 
         return set_ok
 
-    # In Kibana 6.8 we need to pass an ad-hoc mapping to include the metadashboard and projectname types
+    # In Kibana 6.8 or higher we need to pass an ad-hoc mapping to include the metadashboard and projectname types
     r = requests_ses.put(kibana_index_url, data=json.dumps(KIBANA_MAPPING), headers=HEADERS_JSON)
     r.raise_for_status()
 
